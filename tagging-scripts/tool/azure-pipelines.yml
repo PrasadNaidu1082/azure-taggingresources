@@ -1,0 +1,71 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- none  
+
+pool:
+  vmImage: ubuntu-22.04
+
+steps:
+- script: |
+    # Install prerequisites
+    sudo apt-get update
+    sudo apt-get install -y wget apt-transport-https software-properties-common
+    
+    # Add Microsoft repository
+    wget -q "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb"
+    sudo dpkg -i packages-microsoft-prod.deb
+    
+    # Update package list after adding repository
+    sudo apt-get update
+    
+    # Install PowerShell
+    sudo apt-get install -y powershell
+  displayName: 'Install PowerShell Core'
+
+# - script: |
+#     echo "Listing files in $(System.DefaultWorkingDirectory)"
+#     ls -la $(System.DefaultWorkingDirectory)
+#     echo "Listing files in $(System.DefaultWorkingDirectory)/tagging-scripts"
+#     ls -la $(System.DefaultWorkingDirectory)/tagging-scripts/tagging
+#   displayName: 'Check directory contents'
+
+- task: AzurePowerShell@5
+  inputs:
+    azureSubscription: 'subscription name'
+    ScriptType: 'InlineScript'
+    Inline: |
+      ls -la $(System.DefaultWorkingDirectory)/tagging-scripts/tagging
+      # $csvFilePath = "$(Pipeline.Workspace)/resources.csv"
+       Write-Output "Current working directory: $(System.DefaultWorkingDirectory)"
+       $RESOURCE_FILE = "$(System.DefaultWorkingDirectory)/tagging-scripts/tagging/resources.csv"
+       if (-Not (Test-Path -Path $RESOURCE_FILE)) {
+          Write-Error "CSV file not found at path: $RESOURCE_FILE"
+          exit 1
+      }
+         $resources = Import-Csv -Path $RESOURCE_FILE -Delimiter ","
+         foreach ($resource in $resources) {
+          Write-Output "Searching for resource: $($resource.ResourceName)"
+          $allResources = Get-AzResource
+          $resourceDetails = $allResources | Where-Object { $_.Name -eq $resource.ResourceName }
+          if ($resourceDetails) {
+              foreach ($res in $resourceDetails) {
+                  Write-Output "Resource found: $($res.Name) in resource group: $($res.ResourceGroupName)"
+                  $currentTags = $res.Tags
+                  $currentTags["Environment"] = $resource.Environment
+                  $currentTags["Application"] = $resource.Application
+                  $currentTags["Owner"] = $resource.Owner
+                  $currentTags["Team"] = $resource.Team
+                  Set-AzResource -ResourceId $res.ResourceId -Tag $currentTags -Force
+                  Write-Output "Tags applied to resource $($res.Name)"
+              }
+          } else {
+              Write-Output "Resource $($resource.ResourceName) not found."
+          }
+      }
+    azurePowerShellVersion: 'LatestVersion'
+  
+
